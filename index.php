@@ -204,7 +204,7 @@ function renderCourseCell($course, $extraClass = '') {
     $aisleChunks = array_chunk($aislesWithCourses, 3, true);
     ?>
 
-    <div id="scroll">
+    <div id="scroll-container">
       <div id="content">
         <?php foreach ($aisleChunks as $chunk): ?>
         <table class="table table-bordered table-striped">
@@ -255,7 +255,7 @@ function renderCourseCell($course, $extraClass = '') {
       </div>
     </div>
 
-  <!-- <script src="./js/script.js"></script> -->
+  <script src="./js/script.js"></script>
 </body>
 
 </html>
