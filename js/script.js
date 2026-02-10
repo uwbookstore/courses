@@ -1,0 +1,2 @@
+"use strict";var container=document.getElementById("scroll-container"),speed=1,_infiniteScroll=function(){container.scrollTop+=speed,container.scrollTop>=container.scrollHeight/2&&(container.scrollTop=0),requestAnimationFrame(_infiniteScroll)};window.addEventListener("load",function(){var n=document.getElementById("content"),e=n.cloneNode(!0);e.id="content-clone",n.parentNode.appendChild(e),_infiniteScroll()});
+//# sourceMappingURL=script.js.map
