@@ -4,7 +4,7 @@ ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 require '../db.php';
 
-$REPEAT_THRESHOLD = 10; // aisles with <= 8 courses get repeated
+$REPEAT_THRESHOLD = 10; // aisles with <= 10 courses get repeated
 
 // Fetch aisles
 $aislesResult = $conn->query(
@@ -40,7 +40,10 @@ $result = $conn->query(
 
 while ($row = $result->fetch_assoc()) {
   if ($row['course_id']) {
-    $aislesWithCourses[$row['aisle_id']]['courses'][] = $row;
+    $courseId = (int) $row['course_id'];
+    $aisleId  = (int) $row['aisle_id'];
+
+    $aislesWithCourses[$aisleId]['courses'][] = $row;
 
     $courseAisles[$row['course_id']][] = (int) $row['aisle_id'];
   }
@@ -48,8 +51,41 @@ while ($row = $result->fetch_assoc()) {
 
 foreach ($courseAisles as &$aisles) {
   $aisles = array_values(array_unique($aisles));
-}
+}  
 unset($aisles);
+
+$courseContinuation = [];
+
+foreach ($courseAisles as $courseId => $aisleIds) {
+  if (count($aisleIds) < 2) {
+    continue;
+  }
+
+  foreach ($aisleIds as $index => $aisleId) {
+    if ($index === 0) {
+      // first appearance
+      $courseContinuation[$courseId][$aisleId] =
+        " - continues in aisle " . $aisleIds[$index + 1];
+    } else {
+      // subsequent appearances
+      $courseContinuation[$courseId][$aisleId] =
+        " - continued from aisle " . $aisleIds[$index - 1];
+    }
+  }
+}
+
+foreach ($aislesWithCourses as &$aisle) {
+  foreach ($aisle['courses'] as &$course) {
+    $courseId = $course['course_id'];
+    $aisleId  = $course['aisle_id'];
+
+    if (isset($courseContinuation[$courseId][$aisleId])) {
+      $course['continuation_note'] =
+        $courseContinuation[$courseId][$aisleId];
+    }
+  }
+}
+unset($aisle, $course);
 
 $MAX_ROWS = 35;
 
@@ -57,23 +93,36 @@ foreach ($aislesWithCourses as &$aisle) {
   $courses = $aisle['courses'];
   $count = count($courses);
 
-  if ($count > $MAX_ROWS) {
-    $splitAt = (int) ceil($count / 2);
-    $aisle['columns'] = [
-      array_slice($courses, 0, $splitAt),
-      array_slice($courses, $splitAt),
-    ];
-  } else {
-    $aisle['columns'] = [$courses];
+  $virtual = array_fill(0, $MAX_ROWS, null);
+
+  // place original courses at top
+  foreach ($courses as $i => $course) {
+    $virtual[$i] = $course;
   }
+
+  if ($count > 0 && $count <= $REPEAT_THRESHOLD) {
+
+    // middle repeat
+    $middleStart = (int) floor(($MAX_ROWS - $count) / 2);
+    foreach ($courses as $i => $course) {
+      $virtual[$middleStart + $i] = $course;
+    }
+
+    // bottom repeat
+    $bottomStart = $MAX_ROWS - $count;
+    foreach ($courses as $i => $course) {
+      $virtual[$bottomStart + $i] = $course;
+    }
+  }
+
+  $aisle['virtual_courses'] = $virtual;
 }
 unset($aisle);
 
 foreach ($aislesWithCourses as &$aisle) {
-  $courses = $aisle['courses'];
+  $courses = $aisle['virtual_courses'];
   $count = count($courses);
 
-  // existing column split logic
   if ($count > $MAX_ROWS) {
     $splitAt = (int) ceil($count / 2);
     $aisle['columns'] = [
@@ -82,21 +131,6 @@ foreach ($aislesWithCourses as &$aisle) {
     ];
   } else {
     $aisle['columns'] = [$courses];
-  }
-
-  // ✅ NOW compute repeat rules
-  $aisle['repeat'] = [
-    'top'    => false,
-    'middle' => false,
-    'bottom' => false,
-  ];
-
-  if ($count > 0 && $count <= $REPEAT_THRESHOLD) {
-    $aisle['repeat']['bottom'] = true;
-
-    if ($count <= 6) {
-      $aisle['repeat']['middle'] = true;
-    }
   }
 }
 unset($aisle);
@@ -121,11 +155,25 @@ function renderCourseCell($course, $extraClass = '') {
     $class .= ' course-inactive';
   }
 
+  $long = htmlspecialchars($course['long_description']);
+
+  if (!empty($course['continuation_note'])) {
+    $arrow = str_starts_with($course['continuation_note'], ' - continues')
+      ? ' &rarr;'
+      : ' &larr;';
+
+    $long .= sprintf(
+      ' <span class="course-continuation text-muted">%s%s</span>',
+      htmlspecialchars($course['continuation_note']),
+      $arrow
+    );
+  }
+
   if ($course['short_description'] === null) {
     return sprintf(
       '<td colspan="2" class="%s">%s</td>',
       trim($class),
-      htmlspecialchars($course['long_description'])
+      $long
     );
   }
 
@@ -134,8 +182,8 @@ function renderCourseCell($course, $extraClass = '') {
     trim($class),
     htmlspecialchars($course['short_description']),
     trim($class),
-    htmlspecialchars($course['long_description'])
-  );
+    $long
+);
 }
 ?>
 
@@ -156,7 +204,7 @@ function renderCourseCell($course, $extraClass = '') {
     $aisleChunks = array_chunk($aislesWithCourses, 3, true);
     ?>
 
-    <div id="scroll-container">
+    <div id="scroll">
       <div id="content">
         <?php foreach ($aisleChunks as $chunk): ?>
         <table class="table table-bordered table-striped">
@@ -188,29 +236,10 @@ function renderCourseCell($course, $extraClass = '') {
               <?php for ($i = 0; $i < $maxRows; $i++): ?>
               <tr>
                 <?php foreach ($chunk as $aisle): ?>
-                  <?php foreach ($aisle['columns'] as $column): ?>
+                  <?php foreach ($aisle['columns'] as $colIndex => $column): ?>
 
                     <?php
                       $course = $column[$i] ?? null;
-
-                      // MIDDLE repeat
-                      if (
-                        !$course &&
-                        $aisle['repeat']['middle'] &&
-                        $i === (int) floor($maxRows / 2)
-                      ) {
-                        $course = $column[$i % count($column)];
-                      }
-
-                      // BOTTOM repeat
-                      if (
-                        !$course &&
-                        $aisle['repeat']['bottom'] &&
-                        $i > $maxRows - count($column)
-                      ) {
-                        $course = $column[$i % count($column)];
-                      }
-
                       echo renderCourseCell($course);
                     ?>
 
@@ -226,7 +255,7 @@ function renderCourseCell($course, $extraClass = '') {
       </div>
     </div>
 
-  <script src="./js/script.js"></script>
+  <!-- <script src="./js/script.js"></script> -->
 </body>
 
 </html>
