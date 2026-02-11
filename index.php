@@ -6,6 +6,19 @@ require '../db.php';
 
 $REPEAT_THRESHOLD = 10; // aisles with <= 10 courses get repeated
 
+// str_starts_with
+if (!function_exists('str_starts_with')) {
+  function str_starts_with($haystack, $needle) {
+    // str_starts_with(string $haystack, string $needle): bool
+
+    $strlen_needle = mb_strlen($needle);
+    if (mb_substr($haystack, 0, $strlen_needle) === $needle) {
+      return true;
+    }
+    return false;
+  }
+}
+
 // Fetch aisles
 $aislesResult = $conn->query(
   "SELECT id, name
